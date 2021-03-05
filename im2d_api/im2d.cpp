@@ -54,14 +54,16 @@ typedef enum {
     RGA_BUILT,
 } QUERYSTRING_API;
 
-RockchipRga& rkRga(RockchipRga::get());
-
 #define ALIGN(val, align) (((val) + ((align) - 1)) & ~((align) - 1))
+#define DOWN_ALIGN(val, align) ((val) & ~((align) - 1))
+
 #define UNUSED(...) (void)(__VA_ARGS__)
+#define ERR_MSG_LEN 256
 
 using namespace std;
 
 ostringstream err_msg;
+char *err_str = NULL;
 
 IM_API void imErrorMsg(const char* msg) {
     err_msg.str("");
@@ -80,9 +82,9 @@ IM_API const char* imStrError_t(IM_STATUS status) {
         "unkown status"
     };
     ostringstream error;
-    static string msg;
 
-    msg = err_msg.str();
+    if (err_str == NULL)
+        err_str = (char *)malloc(ERR_MSG_LEN*sizeof(char));
 
     switch(status) {
         case IM_STATUS_NOERROR :
@@ -93,31 +95,32 @@ IM_API const char* imStrError_t(IM_STATUS status) {
             break;
 
         case IM_STATUS_NOT_SUPPORTED :
-            error << error_type[2] << msg.c_str() << endl;
+            error << error_type[2] << err_msg.str().c_str() << endl;
             break;
 
         case IM_STATUS_OUT_OF_MEMORY :
-            error << error_type[3] << msg.c_str() << endl;
+            error << error_type[3] << err_msg.str().c_str() << endl;
             break;
 
         case IM_STATUS_INVALID_PARAM :
-            error << error_type[4] << msg.c_str() << endl;
+            error << error_type[4] << err_msg.str().c_str() << endl;
             break;
 
         case IM_STATUS_ILLEGAL_PARAM :
-            error << error_type[5] << msg.c_str() << endl;
+            error << error_type[5] << err_msg.str().c_str() << endl;
             break;
 
         case IM_STATUS_FAILED :
-            error << error_type[6] << msg.c_str() << endl;
+            error << error_type[6] << err_msg.str().c_str() << endl;
             break;
         default :
             error << error_type[7] << endl;
     }
 
-    msg = error.str();
+    memcpy(err_str, error.str().c_str(), ERR_MSG_LEN);
     imErrorMsg("No error message, it has been cleared.");
-    return msg.c_str();
+
+    return err_str;
 }
 
 IM_API rga_buffer_t wrapbuffer_virtualaddr_t(void* vir_addr, int width, int height, int wstride, int hstride, int format) {
@@ -173,6 +176,8 @@ IM_API rga_buffer_t wrapbuffer_handle(buffer_handle_t hnd) {
     rga_buffer_t buffer;
     std::vector<int> dstAttrs;
 
+    RockchipRga& rkRga(RockchipRga::get());
+
     memset(&buffer, 0, sizeof(rga_buffer_t));
 
     ret = rkRga.RkRgaGetBufferFd(hnd, &buffer.fd);
@@ -212,8 +217,11 @@ INVAILD:
 }
 
 IM_API rga_buffer_t wrapbuffer_GraphicBuffer(sp<GraphicBuffer> buf) {
-    rga_buffer_t buffer;
     int ret = 0;
+    rga_buffer_t buffer;
+    std::vector<int> dstAttrs;
+
+    RockchipRga& rkRga(RockchipRga::get());
 
     memset(&buffer, 0, sizeof(rga_buffer_t));
 
@@ -229,16 +237,25 @@ IM_API rga_buffer_t wrapbuffer_GraphicBuffer(sp<GraphicBuffer> buf) {
             goto INVAILD;
         }
     }
-    if (buf->getWidth() % 16) {
-        ALOGE("rga_im2d: Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
-        imErrorMsg("Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
+
+    ret = RkRgaGetHandleAttributes(buf->handle, &dstAttrs);
+    if (ret) {
+        ALOGE("rga_im2d: handle get Attributes fail ret = %d,hnd=%p", ret, &buf->handle);
+        imErrorMsg("handle get Attributes fail.");
+        goto INVAILD;
     }
 
-    buffer.width   = buf->getWidth();
-    buffer.height  = buf->getHeight();
-    buffer.wstride = buf->getStride();
-    buffer.hstride = buf->getHeight();
-    buffer.format  = buf->getPixelFormat();
+    buffer.width   = dstAttrs.at(AWIDTH);
+    buffer.height  = dstAttrs.at(AHEIGHT);
+    buffer.wstride = dstAttrs.at(ASTRIDE);
+    buffer.hstride = dstAttrs.at(AHEIGHT);
+    buffer.format  = dstAttrs.at(AFORMAT);
+
+    if (buffer.width % 16) {
+        ALOGE("rga_im2d: Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
+        imErrorMsg("Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
+        goto INVAILD;
+    }
 
 INVAILD:
     return buffer;
@@ -247,8 +264,11 @@ INVAILD:
 #if USE_AHARDWAREBUFFER
 #include <android/hardware_buffer.h>
 IM_API rga_buffer_t wrapbuffer_AHardwareBuffer(AHardwareBuffer *buf) {
-    rga_buffer_t buffer;
     int ret = 0;
+    rga_buffer_t buffer;
+    std::vector<int> dstAttrs;
+
+    RockchipRga& rkRga(RockchipRga::get());
 
     memset(&buffer, 0, sizeof(rga_buffer_t));
 
@@ -267,17 +287,24 @@ IM_API rga_buffer_t wrapbuffer_AHardwareBuffer(AHardwareBuffer *buf) {
         }
     }
 
-    if (gbuffer->getWidth() % 16) {
-        ALOGE("rga_im2d: Graphicbuffer wstride needs align to 16, please align to 16or use other buffer types");
-        imErrorMsg("Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
+    ret = RkRgaGetHandleAttributes(gbuffer->handle, &dstAttrs);
+    if (ret) {
+        ALOGE("rga_im2d: handle get Attributes fail ret = %d,hnd=%p", ret, &gbuffer->handle);
+        imErrorMsg("handle get Attributes fail.");
         goto INVAILD;
     }
 
-    buffer.width   = gbuffer->getWidth();
-    buffer.height  = gbuffer->getHeight();
-    buffer.wstride = gbuffer->getStride();
-    buffer.hstride = gbuffer->getHeight();
-    buffer.format  = gbuffer->getPixelFormat();
+    buffer.width   = dstAttrs.at(AWIDTH);
+    buffer.height  = dstAttrs.at(AHEIGHT);
+    buffer.wstride = dstAttrs.at(ASTRIDE);
+    buffer.hstride = dstAttrs.at(AHEIGHT);
+    buffer.format  = dstAttrs.at(AFORMAT);
+
+    if (buffer.width % 16) {
+        ALOGE("rga_im2d: Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
+        imErrorMsg("Graphicbuffer wstride needs align to 16, please align to 16 or use other buffer types.");
+        goto INVAILD;
+    }
 
 INVAILD:
     return buffer;
@@ -948,22 +975,22 @@ IM_API IM_STATUS imcheck_t(const rga_buffer_t src, const rga_buffer_t dst, const
     if ((~mode_usage & IM_COLOR_FILL) && (~mode_usage & IM_CROP)) {
         switch (usage & IM_RGA_INFO_SCALE_LIMIT_MASK) {
             case IM_RGA_INFO_SCALE_LIMIT_8 :
-                if (((src.width >> 3) >= dst.width) || ((src.height >> 3) >= dst.height)) {
+                if (((src.width >> 3) > dst.width) || ((src.height >> 3) > dst.height)) {
                     imErrorMsg("Unsupported to scaling less than 1/8 times.");
                     return IM_STATUS_NOT_SUPPORTED;
                 }
-                if (((dst.width >> 3) >= src.width) || ((dst.height >> 3) >= src.height)) {
+                if (((dst.width >> 3) > src.width) || ((dst.height >> 3) > src.height)) {
                     imErrorMsg("Unsupported to scaling more than 8 times.");
                     return IM_STATUS_NOT_SUPPORTED;
                 }
                 break;
 
             case IM_RGA_INFO_SCALE_LIMIT_16 :
-                if (((src.width >> 4) >= dst.width) || ((src.height >> 4) >= dst.height)) {
+                if (((src.width >> 4) > dst.width) || ((src.height >> 4) > dst.height)) {
                     imErrorMsg("Unsupported to scaling less than 1/16 times.");
                     return IM_STATUS_NOT_SUPPORTED;
                 }
-                if (((dst.width >> 4) >= src.width) || ((dst.height >> 4) >= src.height)) {
+                if (((dst.width >> 4) > src.width) || ((dst.height >> 4) > src.height)) {
                     imErrorMsg("Unsupported to scaling more than 16 times.");
                     return IM_STATUS_NOT_SUPPORTED;
                 }
@@ -1252,6 +1279,7 @@ IM_API IM_STATUS imcheck_t(const rga_buffer_t src, const rga_buffer_t dst, const
 
 IM_API IM_STATUS imresize_t(const rga_buffer_t src, rga_buffer_t dst, double fx, double fy, int interpolation, int sync) {
     int usage = 0;
+    int width = 0, height = 0;
     IM_STATUS ret = IM_STATUS_NOERROR;
 
     rga_buffer_t pat;
@@ -1269,8 +1297,18 @@ IM_API IM_STATUS imresize_t(const rga_buffer_t src, rga_buffer_t dst, double fx,
         dst.width = (int)(src.width * fx);
         dst.height = (int)(src.height * fy);
 
-        if(NormalRgaIsYuvFormat(RkRgaGetRgaFormat(src.format)))
-            dst.width = ALIGN(dst.width, 2);
+        if(NormalRgaIsYuvFormat(RkRgaGetRgaFormat(src.format))) {
+            width = dst.width;
+            height = dst.height;
+            dst.width = DOWN_ALIGN(dst.width, 2);
+            dst.height = DOWN_ALIGN(dst.height, 2);
+
+            ret = imcheck(src, dst, srect, drect, usage);
+            if (ret != IM_STATUS_NOERROR) {
+                ALOGE("imresize error, factor[fx,fy]=[%lf,%lf], ALIGN[dw,dh]=[%d,%d][%d,%d]", fx, fy, width, height, dst.width, dst.height);
+                return ret;
+            }
+        }
     }
     UNUSED(interpolation);
 
@@ -1571,6 +1609,8 @@ IM_API IM_STATUS improcess(rga_buffer_t src, rga_buffer_t dst, rga_buffer_t pat,
     rga_info_t patinfo;
     int ret;
 
+    RockchipRga& rkRga(RockchipRga::get());
+
     src.format = RkRgaCompatibleFormat(src.format);
     dst.format = RkRgaCompatibleFormat(dst.format);
     pat.format = RkRgaCompatibleFormat(pat.format);
@@ -1789,6 +1829,9 @@ IM_API IM_STATUS improcess(rga_buffer_t src, rga_buffer_t dst, rga_buffer_t pat,
 
 IM_API IM_STATUS imsync(void) {
     int ret = 0;
+
+    RockchipRga& rkRga(RockchipRga::get());
+
     ret = rkRga.RkRgaFlush();
     if (ret)
         return IM_STATUS_FAILED;
