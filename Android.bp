@@ -67,7 +67,7 @@ cc_library_shared {
         "hardware/libhardware/include/hardware",
         "hardware/libhardware/modules/gralloc",
         "frameworks/native/libs/nativewindow/include",
-        "system/core/liblog/include",
+        "system/logging/liblog/include",
         "system/core/libsync",
         "system/core/libsync/include",
     ],
