@@ -19,7 +19,7 @@ func DefaultsFactory() (android.Module) {
 }
 
 func Defaults(ctx android.LoadHookContext) {
-    sdkVersion := ctx.AConfig().PlatformSdkVersionInt()
+    sdkVersion := ctx.AConfig().PlatformSdkVersion().FinalOrFutureInt()
 
     if (sdkVersion >= 29 ) {
         type props struct {
@@ -62,7 +62,7 @@ func Defaults(ctx android.LoadHookContext) {
 func getCflags(ctx android.BaseContext) ([]string) {
     var cppflags []string
 
-    sdkVersion := ctx.AConfig().PlatformSdkVersionInt()
+    sdkVersion := ctx.AConfig().PlatformSdkVersion().FinalOrFutureInt()
 
     //该打印输出为: TARGET_PRODUCT:rk3328 fmt.Println("TARGET_PRODUCT:",ctx.AConfig().Getenv("TARGET_PRODUCT")) //通过 strings.EqualFold 比较字符串，可参考go语言字符串对比
     if (strings.EqualFold(ctx.AConfig().Getenv("TARGET_BOARD_PLATFORM"),"rk3368") ) {
@@ -83,7 +83,7 @@ func getCflags(ctx android.BaseContext) ([]string) {
 func getSharedLibs(ctx android.BaseContext) ([]string) {
     var libs []string
 
-    sdkVersion := ctx.AConfig().PlatformSdkVersionInt()
+    sdkVersion := ctx.AConfig().PlatformSdkVersion().FinalOrFutureInt()
 
     if (strings.EqualFold(ctx.AConfig().Getenv("TARGET_RK_GRALLOC_VERSION"),"4") ) {
         if (sdkVersion >= 30 ) {
@@ -103,7 +103,7 @@ func getSharedLibs(ctx android.BaseContext) ([]string) {
 func getIncludeDirs(ctx android.BaseContext) ([]string) {
     var dirs []string
 
-    sdkVersion := ctx.AConfig().PlatformSdkVersionInt()
+    sdkVersion := ctx.AConfig().PlatformSdkVersion().FinalOrFutureInt()
 
     if (strings.EqualFold(ctx.AConfig().Getenv("TARGET_RK_GRALLOC_VERSION"),"4") ) {
         if (sdkVersion >= 30 ) {
@@ -118,7 +118,7 @@ func getIncludeDirs(ctx android.BaseContext) ([]string) {
 func getSrcs(ctx android.BaseContext) ([]string) {
     var src []string
 
-    sdkVersion := ctx.AConfig().PlatformSdkVersionInt()
+    sdkVersion := ctx.AConfig().PlatformSdkVersion().FinalOrFutureInt()
 
     if (strings.EqualFold(ctx.AConfig().Getenv("TARGET_RK_GRALLOC_VERSION"),"4") ) {
         if (sdkVersion >= 30 ) {
