@@ -50,7 +50,7 @@
 #include <ui/PixelFormat.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
-#include <ui/DisplayInfo.h>
+#include <ui/StaticDisplayInfo.h>
 #include <ui/GraphicBufferMapper.h>
 #include <gui/ISurfaceComposer.h>
 #endif
