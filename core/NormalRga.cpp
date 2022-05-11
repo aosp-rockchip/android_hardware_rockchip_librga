@@ -95,45 +95,49 @@ int NormalRgaOpen(void **context) {
             ALOGE("malloc fail:%s.",strerror(errno));
             goto mallocErr;
         }
+
+        fd = open("/dev/rga", O_RDWR, 0);
+        if (fd < 0) {
+            ret = -ENODEV;
+            ALOGE("failed to open RGA:%s.",strerror(errno));
+            goto rgaOpenErr;
+        }
+        ctx->rgaFd = fd;
+
+        /* Get RGA hardware version. */
+        ret = ioctl(fd, RGA2_GET_VERSION, buf);
+        if (ret < 0) {
+            ret = ioctl(fd, RGA_GET_VERSION, buf);
+        }
+
+        ctx->mVersion = atof(buf);
+        memcpy(ctx->mVersion_str, buf, sizeof(ctx->mVersion_str));
+
+        NormalRgaInitTables();
+
+        rgaCtx = ctx;
     } else {
         ctx = rgaCtx;
         ALOGE("Had init the rga dev ctx = %p",ctx);
-        goto init;
     }
 
-    fd = open("/dev/rga", O_RDWR, 0);
-    if (fd < 0) {
-        ret = -ENODEV;
-        ALOGE("failed to open DRM:%s.",strerror(errno));
-        goto drmOpenErr;
-    }
-    ctx->rgaFd = fd;
-
-    ret = ioctl(fd, RGA_GET_VERSION, buf);
-    ctx->mVersion = atof(buf);
-
-    NormalRgaInitTables();
-
-    rgaCtx = ctx;
-
-init:
 #ifdef ANDROID
     android_atomic_inc(&refCount);
 #elif LINUX
-	pthread_mutex_lock(&mMutex);
-	refCount++;
-	pthread_mutex_unlock(&mMutex);
+    pthread_mutex_lock(&mMutex);
+    refCount++;
+    pthread_mutex_unlock(&mMutex);
 #endif
     *context = (void *)ctx;
     return ret;
 
-drmOpenErr:
+rgaOpenErr:
     free(ctx);
 mallocErr:
     return ret;
 }
 
-int NormalRgaClose(void *context) {
+int NormalRgaClose(void **context) {
     struct rgaContext *ctx = rgaCtx;
 
     if (!ctx) {
@@ -141,12 +145,12 @@ int NormalRgaClose(void *context) {
         return -ENODEV;
     }
 
-    if (!context) {
-        ALOGE("Try to uninit rgaCtx=%p", context);
+    if (!*context) {
+        ALOGE("Try to uninit rgaCtx=%p", *context);
         return -ENODEV;
     }
 
-    if (context != ctx) {
+    if (*context != ctx) {
         ALOGE("Try to exit wrong ctx=%p",ctx);
         return -ENODEV;
     }
@@ -160,25 +164,26 @@ int NormalRgaClose(void *context) {
     if (refCount > 0 && android_atomic_dec(&refCount) != 1)
         return 0;
 #elif LINUX
-	pthread_mutex_lock(&mMutex);
-	refCount--;
+    pthread_mutex_lock(&mMutex);
+    refCount--;
 
-	if (refCount < 0) {
-		refCount = 0;
-		pthread_mutex_unlock(&mMutex);
-		return 0;
-	}
+    if (refCount < 0) {
+        refCount = 0;
+        pthread_mutex_unlock(&mMutex);
+        return 0;
+    }
 
-	if (refCount > 0)
-	{
-		pthread_mutex_unlock(&mMutex);
-		return 0;
-	}
+    if (refCount > 0)
+    {
+        pthread_mutex_unlock(&mMutex);
+        return 0;
+    }
 
-	pthread_mutex_unlock(&mMutex);
+    pthread_mutex_unlock(&mMutex);
 #endif
 
     rgaCtx = NULL;
+    *context = NULL;
 
     close(ctx->rgaFd);
 
@@ -191,14 +196,13 @@ int RgaInit(void **ctx) {
     int ret = 0;
     ret = NormalRgaOpen(ctx);
 #ifdef ANDROID
-    property_set("vendor.rga_lib.version", RGA_LIB_VERSION);
-    property_set("vendor.rga_im2d.version", RGA_IM2D_VERSION);
-    property_set("vendor.rga_built.version", RGA_BUILT_VERSION);
+    property_set("vendor.rga_api.version", RGA_API_VERSION);
+    property_set("vendor.rga_built.version", RGA_API_GIT_BUILD_VERSION);
 #endif
     return ret;
 }
 
-int RgaDeInit(void *ctx) {
+int RgaDeInit(void **ctx) {
     int ret = 0;
     ret = NormalRgaClose(ctx);
     return ret;
@@ -431,198 +435,198 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
     srcFd = dstFd = src1Fd = -1;
 
 #ifdef ANDROID
-	if (is_out_log()) {
-		ALOGD("src->hnd = %p , dst->hnd = %p , src1->hnd = %p\n", src->hnd, dst->hnd, src1 ? src1->hnd : 0);
-		ALOGD("src: Fd = %.2d , phyAddr = %p , virAddr = %p\n",src->fd,src->phyAddr,src->virAddr);
-		if (src1)
-			ALOGD("src1: Fd = %.2d , phyAddr = %p , virAddr = %p\n", src1->fd, src1->phyAddr, src1->virAddr);
-		ALOGD("dst: Fd = %.2d , phyAddr = %p , virAddr = %p\n",dst->fd,dst->phyAddr,dst->virAddr);
-	}
+    if (is_out_log()) {
+        ALOGD("src->hnd = %p , dst->hnd = %p , src1->hnd = %p\n", src->hnd, dst->hnd, src1 ? src1->hnd : 0);
+        ALOGD("src: Fd = %.2d , phyAddr = %p , virAddr = %p\n",src->fd,src->phyAddr,src->virAddr);
+        if (src1)
+            ALOGD("src1: Fd = %.2d , phyAddr = %p , virAddr = %p\n", src1->fd, src1->phyAddr, src1->virAddr);
+        ALOGD("dst: Fd = %.2d , phyAddr = %p , virAddr = %p\n",dst->fd,dst->phyAddr,dst->virAddr);
+    }
 #endif
-	/*********** get src addr *************/
-	if (src && src->phyAddr) {
-		srcBuf = src->phyAddr;
-	} else if (src && src->fd > 0) {
-		srcFd = src->fd;
-		src->mmuFlag = 1;
-	} else if (src && src->virAddr) {
-		srcBuf = src->virAddr;
-		src->mmuFlag = 1;
-	}
-	/*
-	 * After getting the fd or virtual address through the handle,
-	 * set 'srcType' to 1, and at the end, and then judge
-	 * the 'srcType' at the end whether to enable mmu.
-	 */
+    /*********** get src addr *************/
+    if (src && src->phyAddr) {
+        srcBuf = src->phyAddr;
+    } else if (src && src->fd > 0) {
+        srcFd = src->fd;
+        src->mmuFlag = 1;
+    } else if (src && src->virAddr) {
+        srcBuf = src->virAddr;
+        src->mmuFlag = 1;
+    }
+    /*
+     * After getting the fd or virtual address through the handle,
+     * set 'srcType' to 1, and at the end, and then judge
+     * the 'srcType' at the end whether to enable mmu.
+     */
 #ifdef ANDROID
-	else if (src && src->hnd) {
+    else if (src && src->hnd) {
 #ifndef RK3188
-		/* RK3188 is special, cannot configure rga through fd. */
-		RkRgaGetHandleFd(src->hnd, &srcFd);
+        /* RK3188 is special, cannot configure rga through fd. */
+        RkRgaGetHandleFd(src->hnd, &srcFd);
 #endif
 #ifndef ANDROID_8
-		if (srcFd < 0 || srcFd == 0) {
-			RkRgaGetHandleMapAddress(src->hnd, &srcBuf);
-		}
+        if (srcFd < 0 || srcFd == 0) {
+            RkRgaGetHandleMapAddress(src->hnd, &srcBuf);
+        }
 #endif
-		if ((srcFd < 0 || srcFd == 0) && srcBuf == NULL) {
-			ALOGE("src handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src->hnd);
-			printf("src handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src->hnd);
-			return ret;
-		}
-		else {
-			srcType = 1;
-		}
-	}
+        if ((srcFd < 0 || srcFd == 0) && srcBuf == NULL) {
+            ALOGE("src handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src->hnd);
+            printf("src handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src->hnd);
+            return ret;
+        }
+        else {
+            srcType = 1;
+        }
+    }
 
-	if (!isRectValid(relSrcRect)) {
-		ret = NormalRgaGetRect(src->hnd, &tmpSrcRect);
-		if (ret) {
-			ALOGE("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &src->hnd);
-			printf("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &src->hnd);
-			return ret;
-		}
-		memcpy(&relSrcRect, &tmpSrcRect, sizeof(rga_rect_t));
-	}
+    if (!isRectValid(relSrcRect)) {
+        ret = NormalRgaGetRect(src->hnd, &tmpSrcRect);
+        if (ret) {
+            ALOGE("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &src->hnd);
+            printf("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &src->hnd);
+            return ret;
+        }
+        memcpy(&relSrcRect, &tmpSrcRect, sizeof(rga_rect_t));
+    }
 #endif
-	if (srcFd == -1 && !srcBuf) {
-		ALOGE("%d:src has not fd and address for render", __LINE__);
-		return ret;
-	}
-	if (srcFd == 0 && !srcBuf) {
-		ALOGE("srcFd is zero, now driver not support");
-		return -EINVAL;
-	}
-	/* Old rga driver cannot support fd as zero. */
-	if (srcFd == 0)
-		srcFd = -1;
+    if (srcFd == -1 && !srcBuf) {
+        ALOGE("%d:src has not fd and address for render", __LINE__);
+        return ret;
+    }
+    if (srcFd == 0 && !srcBuf) {
+        ALOGE("srcFd is zero, now driver not support");
+        return -EINVAL;
+    }
+    /* Old rga driver cannot support fd as zero. */
+    if (srcFd == 0)
+        srcFd = -1;
 
-	/*********** get src1 addr *************/
-	if (src1) {
-		if (src1 && src1->phyAddr) {
-			src1Buf = src1->phyAddr;
-		} else if (src1 && src1->fd > 0) {
-			src1Fd = src1->fd;
-			src1->mmuFlag = 1;
-		} else if (src1 && src1->virAddr) {
-			src1Buf = src1->virAddr;
-			src1->mmuFlag = 1;
-		}
-		/*
-		 * After getting the fd or virtual address through the handle,
-		 * set 'src1Type' to 1, and at the end, and then judge
-		 * the 'src1Type' at the end whether to enable mmu.
-		 */
+    /*********** get src1 addr *************/
+    if (src1) {
+        if (src1 && src1->phyAddr) {
+            src1Buf = src1->phyAddr;
+        } else if (src1 && src1->fd > 0) {
+            src1Fd = src1->fd;
+            src1->mmuFlag = 1;
+        } else if (src1 && src1->virAddr) {
+            src1Buf = src1->virAddr;
+            src1->mmuFlag = 1;
+        }
+        /*
+         * After getting the fd or virtual address through the handle,
+         * set 'src1Type' to 1, and at the end, and then judge
+         * the 'src1Type' at the end whether to enable mmu.
+         */
 #ifdef ANDROID
-		else if (src1 && src1->hnd) {
+        else if (src1 && src1->hnd) {
 #ifndef RK3188
-			/* RK3188 is special, cannot configure rga through fd. */
-		RkRgaGetHandleFd(src1->hnd, &src1Fd);
+            /* RK3188 is special, cannot configure rga through fd. */
+        RkRgaGetHandleFd(src1->hnd, &src1Fd);
 #endif
 #ifndef ANDROID_8
-			if (src1Fd < 0 || src1Fd == 0) {
-				RkRgaGetHandleMapAddress(src1->hnd, &src1Buf);
-			}
+            if (src1Fd < 0 || src1Fd == 0) {
+                RkRgaGetHandleMapAddress(src1->hnd, &src1Buf);
+            }
 #endif
-			if ((src1Fd < 0 || src1Fd == 0) && src1Buf == NULL) {
-				ALOGE("src1 handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src1->hnd);
-				printf("src1 handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src1->hnd);
-				return ret;
-			}
-			else {
-				src1Type = 1;
-			}
-		}
+            if ((src1Fd < 0 || src1Fd == 0) && src1Buf == NULL) {
+                ALOGE("src1 handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src1->hnd);
+                printf("src1 handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &src1->hnd);
+                return ret;
+            }
+            else {
+                src1Type = 1;
+            }
+        }
 
-		if (!isRectValid(relSrc1Rect)) {
-			ret = NormalRgaGetRect(src1->hnd, &tmpSrc1Rect);
-			if (ret) {
-				ALOGE("src1 handleGetRect fail ,ret = %d,hnd=%p", ret, &src1->hnd);
-				printf("src1 handleGetRect fail ,ret = %d,hnd=%p", ret, &src1->hnd);
-				return ret;
-			}
-			memcpy(&relSrc1Rect, &tmpSrc1Rect, sizeof(rga_rect_t));
-		}
+        if (!isRectValid(relSrc1Rect)) {
+            ret = NormalRgaGetRect(src1->hnd, &tmpSrc1Rect);
+            if (ret) {
+                ALOGE("src1 handleGetRect fail ,ret = %d,hnd=%p", ret, &src1->hnd);
+                printf("src1 handleGetRect fail ,ret = %d,hnd=%p", ret, &src1->hnd);
+                return ret;
+            }
+            memcpy(&relSrc1Rect, &tmpSrc1Rect, sizeof(rga_rect_t));
+        }
 #endif
-		if (src1Fd == -1 && !src1Buf) {
-			ALOGE("%d:src1 has not fd and address for render", __LINE__);
-			return ret;
-		}
-		if (src1Fd == 0 && !src1Buf) {
-			ALOGE("src1Fd is zero, now driver not support");
-			return -EINVAL;
-		}
-		/* Old rga driver cannot support fd as zero. */
-		if (src1Fd == 0)
-			src1Fd = -1;
-	}
+        if (src1Fd == -1 && !src1Buf) {
+            ALOGE("%d:src1 has not fd and address for render", __LINE__);
+            return ret;
+        }
+        if (src1Fd == 0 && !src1Buf) {
+            ALOGE("src1Fd is zero, now driver not support");
+            return -EINVAL;
+        }
+        /* Old rga driver cannot support fd as zero. */
+        if (src1Fd == 0)
+            src1Fd = -1;
+    }
 
-	/*********** get dst addr *************/
-	if (dst && dst->phyAddr) {
-		dstBuf = dst->phyAddr;
-	} else if (dst && dst->fd > 0) {
-		dstFd = dst->fd;
-		dst->mmuFlag = 1;
-	} else if (dst && dst->virAddr) {
-		dstBuf = dst->virAddr;
-		dst->mmuFlag = 1;
-	}
-	/*
-	 * After getting the fd or virtual address through the handle,
-	 * set 'dstType' to 1, and at the end, and then judge
-	 * the 'dstType' at the end whether to enable mmu.
-	 */
+    /*********** get dst addr *************/
+    if (dst && dst->phyAddr) {
+        dstBuf = dst->phyAddr;
+    } else if (dst && dst->fd > 0) {
+        dstFd = dst->fd;
+        dst->mmuFlag = 1;
+    } else if (dst && dst->virAddr) {
+        dstBuf = dst->virAddr;
+        dst->mmuFlag = 1;
+    }
+    /*
+     * After getting the fd or virtual address through the handle,
+     * set 'dstType' to 1, and at the end, and then judge
+     * the 'dstType' at the end whether to enable mmu.
+     */
 #ifdef ANDROID
-	else if (dst && dst->hnd) {
+    else if (dst && dst->hnd) {
 #ifndef RK3188
-		/* RK3188 is special, cannot configure rga through fd. */
-		RkRgaGetHandleFd(dst->hnd, &dstFd);
+        /* RK3188 is special, cannot configure rga through fd. */
+        RkRgaGetHandleFd(dst->hnd, &dstFd);
 #endif
 #ifndef ANDROID_8
-		if (dstFd < 0 || dstFd == 0) {
-			RkRgaGetHandleMapAddress(dst->hnd, &dstBuf);
-		}
+        if (dstFd < 0 || dstFd == 0) {
+            RkRgaGetHandleMapAddress(dst->hnd, &dstBuf);
+        }
 #endif
-		if ((dstFd < 0 || dstFd == 0) && dstBuf == NULL) {
-			ALOGE("dst handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &dst->hnd);
-			printf("dst handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &dst->hnd);
-			return ret;
-		}
-		else {
-			dstType = 1;
-		}
-	}
+        if ((dstFd < 0 || dstFd == 0) && dstBuf == NULL) {
+            ALOGE("dst handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &dst->hnd);
+            printf("dst handle get fd and vir_addr fail ret = %d,hnd=%p", ret, &dst->hnd);
+            return ret;
+        }
+        else {
+            dstType = 1;
+        }
+    }
 
-	if (!isRectValid(relDstRect)) {
-		ret = NormalRgaGetRect(dst->hnd, &tmpDstRect);
-		if (ret) {
-			ALOGE("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &dst->hnd);
-			printf("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &dst->hnd);
-			return ret;
-		}
-		memcpy(&relDstRect, &tmpDstRect, sizeof(rga_rect_t));
-	}
+    if (!isRectValid(relDstRect)) {
+        ret = NormalRgaGetRect(dst->hnd, &tmpDstRect);
+        if (ret) {
+            ALOGE("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &dst->hnd);
+            printf("dst handleGetRect fail ,ret = %d,hnd=%p", ret, &dst->hnd);
+            return ret;
+        }
+        memcpy(&relDstRect, &tmpDstRect, sizeof(rga_rect_t));
+    }
 #endif
 
-	if (dstFd == -1 && !dstBuf) {
-		ALOGE("%d:dst has not fd and address for render", __LINE__);
-		return ret;
-	}
-	if (dstFd == 0 && !dstBuf) {
-		ALOGE("dstFd is zero, now driver not support");
-		return -EINVAL;
-	}
-	/* Old rga driver cannot support fd as zero. */
-	if (dstFd == 0)
-		dstFd = -1;
+    if (dstFd == -1 && !dstBuf) {
+        ALOGE("%d:dst has not fd and address for render", __LINE__);
+        return ret;
+    }
+    if (dstFd == 0 && !dstBuf) {
+        ALOGE("dstFd is zero, now driver not support");
+        return -EINVAL;
+    }
+    /* Old rga driver cannot support fd as zero. */
+    if (dstFd == 0)
+        dstFd = -1;
 
 #ifdef ANDROID
-	if(is_out_log()) {
-		ALOGD("src: Fd = %.2d , buf = %p, mmuFlag = %d, mmuType = %d\n", srcFd, srcBuf, src->mmuFlag, srcType);
-		if (src1)
-			ALOGD("src1: Fd = %.2d , buf = %p, mmuFlag = %d, mmuType = %d\n", src1Fd, src1Buf, src1->mmuFlag, src1Type);
-		ALOGD("dst: Fd = %.2d , buf = %p, mmuFlag = %d, mmuType = %d\n", dstFd, dstBuf, dst->mmuFlag, dstType);
-	}
+    if(is_out_log()) {
+        ALOGD("src: Fd = %.2d , buf = %p, mmuFlag = %d, mmuType = %d\n", srcFd, srcBuf, src->mmuFlag, srcType);
+        if (src1)
+            ALOGD("src1: Fd = %.2d , buf = %p, mmuFlag = %d, mmuType = %d\n", src1Fd, src1Buf, src1->mmuFlag, src1Type);
+        ALOGD("dst: Fd = %.2d , buf = %p, mmuFlag = %d, mmuType = %d\n", dstFd, dstBuf, dst->mmuFlag, dstType);
+    }
 #endif
 
     relSrcRect.format = RkRgaCompatibleFormat(relSrcRect.format);
@@ -646,17 +650,7 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
     planeAlpha = (blend & 0xFF0000) >> 16;
 
     /* determined by format, need pixel alpha or not. */
-
-    perpixelAlpha =
-#ifdef ANDROID
-    perpixelAlpha = relSrcRect.format == HAL_PIXEL_FORMAT_RGBA_8888 ||
-                    relSrcRect.format == HAL_PIXEL_FORMAT_BGRA_8888 ||
-                    relSrcRect.format == RK_FORMAT_RGBA_8888 ||
-                    relSrcRect.format == RK_FORMAT_BGRA_8888;
-#else
-    perpixelAlpha = relSrcRect.format == RK_FORMAT_RGBA_8888 ||
-                    relSrcRect.format == RK_FORMAT_BGRA_8888;
-#endif
+    perpixelAlpha = NormalRgaFormatHasAlpha(RkRgaGetRgaFormat(relSrcRect.format));
 
 #ifdef ANDROID
     if(is_out_log())
@@ -673,7 +667,7 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
             NormalRgaSetAlphaEnInfo(&rgaReg, 1, 2, planeAlpha , 1, 2, 0);
             break;
 
-        case 0x0105:/* src over */
+        case 0x0105:/* src over , no need to Premultiplied. */
             if (perpixelAlpha && planeAlpha < 255) {
                 NormalRgaSetAlphaEnInfo(&rgaReg, 1, 2, planeAlpha, 1, 9, 0);
             } else if (perpixelAlpha)
@@ -682,20 +676,28 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
                 NormalRgaSetAlphaEnInfo(&rgaReg, 1, 0, planeAlpha, 0, 0, 0);
             break;
 
-        case 0x0501:/* dst over */
+        case 0x0405:/* src over , need to Premultiplied. */
+            if (perpixelAlpha && planeAlpha < 255)
+                NormalRgaSetAlphaEnInfo(&rgaReg, 1, 2, planeAlpha, 1, 9, 0);
+            else if (perpixelAlpha)
+                NormalRgaSetAlphaEnInfo(&rgaReg, 1, 1, 0, 1, 3, 0);
+            else
+                NormalRgaSetAlphaEnInfo(&rgaReg, 1, 0, planeAlpha, 0, 0, 0);
+
+            rgaReg.alpha_rop_flag |= (1 << 9);  //real color mode
+
+            break;
+
+        case 0x0501:/* dst over , no need premultiplied. */
             NormalRgaSetAlphaEnInfo(&rgaReg, 1, 2, planeAlpha , 1, 4, 0);
             break;
 
-        case 0x0405:
-            if (perpixelAlpha && planeAlpha < 255)
-                NormalRgaSetAlphaEnInfo(&rgaReg, 1, 2, planeAlpha, 0, 0, 0);
-            else if (perpixelAlpha)
-                NormalRgaSetAlphaEnInfo(&rgaReg, 1, 1, 0, 0, 0, 0);
-            else
-                NormalRgaSetAlphaEnInfo(&rgaReg, 1, 0, planeAlpha, 0, 0, 0);
+        case 0x0504:/* dst over, need premultiplied. */
+            NormalRgaSetAlphaEnInfo(&rgaReg, 1, 2, planeAlpha , 1, 4, 0);
+            rgaReg.alpha_rop_flag |= (1 << 9);  //real color mode
             break;
 
-		case 0x0100:
+        case 0x0100:
         default:
             /* Tips: BLENDING_NONE is non-zero value, handle zero value as
              * BLENDING_NONE. */
@@ -708,9 +710,9 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
     if (relSrcRect.hstride == 0)
         relSrcRect.hstride = relSrcRect.height;
 
-	if (isRectValid(relSrc1Rect))
-		if (relSrc1Rect.hstride == 0)
-			relSrc1Rect.hstride = relSrc1Rect.height;
+    if (isRectValid(relSrc1Rect))
+        if (relSrc1Rect.hstride == 0)
+            relSrc1Rect.hstride = relSrc1Rect.height;
 
     if (relDstRect.hstride == 0)
         relDstRect.hstride = relDstRect.height;
@@ -745,7 +747,7 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
 
     /* check the scale magnification. */
     if (src1 && src) {
-		hScale = (float)relSrcRect.width / relSrc1Rect.width;
+        hScale = (float)relSrcRect.width / relSrc1Rect.width;
         vScale = (float)relSrcRect.height / relSrc1Rect.height;
         if (rotation == HAL_TRANSFORM_ROT_90 || rotation == HAL_TRANSFORM_ROT_270) {
             hScale = (float)relSrcRect.width / relSrc1Rect.height;
@@ -894,7 +896,7 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
 
             src1VirW = relSrc1Rect.wstride;
             src1VirH = relSrc1Rect.hstride;
-            src1XPos = relSrc1Rect.xoffset + relDstRect.width - 1;
+            src1XPos = relSrc1Rect.xoffset;
             src1YPos = relSrc1Rect.yoffset;
             src1ActW = relSrc1Rect.height;
             src1ActH = relSrc1Rect.width;
@@ -918,8 +920,8 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
 
             src1VirW = relSrc1Rect.wstride;
             src1VirH = relSrc1Rect.hstride;
-            src1XPos = relSrc1Rect.xoffset + relDstRect.width - 1;
-            src1YPos = relSrc1Rect.yoffset + relDstRect.height - 1;
+            src1XPos = relSrc1Rect.xoffset;
+            src1YPos = relSrc1Rect.yoffset;
             src1ActW = relSrc1Rect.width;
             src1ActH = relSrc1Rect.height;
 
@@ -943,7 +945,7 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
             src1VirW = relSrc1Rect.wstride;
             src1VirH = relSrc1Rect.hstride;
             src1XPos = relSrc1Rect.xoffset;
-            src1YPos = relSrc1Rect.yoffset + relDstRect.height - 1;
+            src1YPos = relSrc1Rect.yoffset;
             src1ActW = relSrc1Rect.height;
             src1ActH = relSrc1Rect.width;
 
@@ -999,8 +1001,10 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
     clip.ymax = dstVirH - 1;
 
     if  (NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
-         RkRgaGetRgaFormat(relSrcRect.format) != RK_FORMAT_RGB_565 &&
-         RkRgaGetRgaFormat(relDstRect.format) == RK_FORMAT_RGB_565)
+         (RkRgaGetRgaFormat(relSrcRect.format) != RK_FORMAT_RGB_565 ||
+         RkRgaGetRgaFormat(relSrcRect.format) != RK_FORMAT_BGR_565) &&
+         (RkRgaGetRgaFormat(relDstRect.format) == RK_FORMAT_RGB_565 ||
+         RkRgaGetRgaFormat(relDstRect.format) == RK_FORMAT_BGR_565))
         ditherEn = 1;
     else
         ditherEn = 0;
@@ -1020,13 +1024,13 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
                                    (unsigned long)srcBuf + srcVirW * srcVirH * 5/4,
                                    srcVirW, srcVirH,
                                    RkRgaGetRgaFormat(relSrcRect.format),0);
-		/* src1 */
-		if (src1)
-			NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned long)src1Buf,
-	                                   (unsigned long)src1Buf + src1VirW * src1VirH,
-	                                   (unsigned long)src1Buf + src1VirW * src1VirH * 5/4,
-	                                   src1VirW, src1VirH, &clip,
-	                                   RkRgaGetRgaFormat(relSrc1Rect.format),0);
+        /* src1 */
+        if (src1)
+            NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned long)src1Buf,
+                                       (unsigned long)src1Buf + src1VirW * src1VirH,
+                                       (unsigned long)src1Buf + src1VirW * src1VirH * 5/4,
+                                       src1VirW, src1VirH, &clip,
+                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
         /*dst*/
         NormalRgaSetDstVirtualInfo(&rgaReg, (unsigned long)dstBuf,
                                    (unsigned long)dstBuf + dstVirW * dstVirH,
@@ -1041,11 +1045,11 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
                                    RkRgaGetRgaFormat(relSrcRect.format),0);
         /* src1 */
         if (src1)
-	        NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned long)src1Buf,
-	                                   (unsigned int)src1Buf + src1VirW * src1VirH,
-	                                   (unsigned int)src1Buf + src1VirW * src1VirH * 5/4,
-	                                   src1VirW, src1VirH, &clip,
-	                                   RkRgaGetRgaFormat(relSrc1Rect.format),0);
+            NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned long)src1Buf,
+                                       (unsigned int)src1Buf + src1VirW * src1VirH,
+                                       (unsigned int)src1Buf + src1VirW * src1VirH * 5/4,
+                                       src1VirW, src1VirH, &clip,
+                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
         /*dst*/
         NormalRgaSetDstVirtualInfo(&rgaReg, (unsigned long)dstBuf,
                                    (unsigned int)dstBuf + dstVirW * dstVirH,
@@ -1087,36 +1091,36 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
         }
         /* src1 */
         if (src1) {
-	        if (src1Fd != -1) {
-	            src1MmuFlag = src1Type ? 1 : 0;
-	            if (src1 && src1Fd == src1->fd)
-	                src1MmuFlag = src1->mmuFlag ? 1 : 0;
-	            NormalRgaSetPatVirtualInfo(&rgaReg, 0, 0, 0, src1VirW, src1VirH, &clip,
-	                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
-	            /*src dst fd*/
-	            NormalRgaSetFdsOffsets(&rgaReg, 0, src1Fd, 0, 0);
-	        } else {
-	            if (src1 && src1->hnd)
-	                src1MmuFlag = src1Type ? 1 : 0;
-	            if (src1 && src1Buf == src1->virAddr)
-	                src1MmuFlag = 1;
-	            if (src1 && src1Buf == src1->phyAddr)
-	                src1MmuFlag = 0;
+            if (src1Fd != -1) {
+                src1MmuFlag = src1Type ? 1 : 0;
+                if (src1 && src1Fd == src1->fd)
+                    src1MmuFlag = src1->mmuFlag ? 1 : 0;
+                NormalRgaSetPatVirtualInfo(&rgaReg, 0, 0, 0, src1VirW, src1VirH, &clip,
+                                           RkRgaGetRgaFormat(relSrc1Rect.format),0);
+                /*src dst fd*/
+                NormalRgaSetFdsOffsets(&rgaReg, 0, src1Fd, 0, 0);
+            } else {
+                if (src1 && src1->hnd)
+                    src1MmuFlag = src1Type ? 1 : 0;
+                if (src1 && src1Buf == src1->virAddr)
+                    src1MmuFlag = 1;
+                if (src1 && src1Buf == src1->phyAddr)
+                    src1MmuFlag = 0;
 #if defined(__arm64__) || defined(__aarch64__)
-	            NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned long)src1Buf,
-	                                       (unsigned long)src1Buf + src1VirW * src1VirH,
-	                                       (unsigned long)src1Buf + src1VirW * src1VirH * 5/4,
-	                                       src1VirW, src1VirH, &clip,
-	                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
+                NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned long)src1Buf,
+                                           (unsigned long)src1Buf + src1VirW * src1VirH,
+                                           (unsigned long)src1Buf + src1VirW * src1VirH * 5/4,
+                                           src1VirW, src1VirH, &clip,
+                                           RkRgaGetRgaFormat(relSrc1Rect.format),0);
 #else
-	            NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned int)src1Buf,
-	                                       (unsigned int)src1Buf + src1VirW * src1VirH,
-	                                       (unsigned int)src1Buf + src1VirW * src1VirH * 5/4,
-	                                       src1VirW, src1VirH, &clip,
-	                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
+                NormalRgaSetPatVirtualInfo(&rgaReg, (unsigned int)src1Buf,
+                                           (unsigned int)src1Buf + src1VirW * src1VirH,
+                                           (unsigned int)src1Buf + src1VirW * src1VirH * 5/4,
+                                           src1VirW, src1VirH, &clip,
+                                           RkRgaGetRgaFormat(relSrc1Rect.format),0);
 #endif
-	        }
-	    }
+            }
+        }
         /*dst*/
         if (dstFd != -1) {
             dstMmuFlag = dstType ? 1 : 0;
@@ -1160,17 +1164,17 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
             srcMmuFlag = src->mmuFlag ? 1 : 0;
 
         if (src1) {
-	        if (src1 && src1->hnd)
-	            src1MmuFlag = src1Type ? 1 : 0;
-	        if (src1 && src1Buf == src1->virAddr)
-	            src1MmuFlag = 1;
-	        if (src1 && src1Buf == src1->phyAddr)
-	            src1MmuFlag = 0;
-	        if (src1Fd != -1)
-	            src1MmuFlag = src1Type ? 1 : 0;
-	        if (src1 && src1Fd == src1->fd)
-	            src1MmuFlag = src1->mmuFlag ? 1 : 0;
-	    }
+            if (src1 && src1->hnd)
+                src1MmuFlag = src1Type ? 1 : 0;
+            if (src1 && src1Buf == src1->virAddr)
+                src1MmuFlag = 1;
+            if (src1 && src1Buf == src1->phyAddr)
+                src1MmuFlag = 0;
+            if (src1Fd != -1)
+                src1MmuFlag = src1Type ? 1 : 0;
+            if (src1 && src1Fd == src1->fd)
+                src1MmuFlag = src1->mmuFlag ? 1 : 0;
+        }
 
         if (dst && dst->hnd)
             dstMmuFlag = dstType ? 1 : 0;
@@ -1189,13 +1193,13 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
                                    (unsigned long)srcBuf + srcVirW * srcVirH,
                                    srcVirW, srcVirH,
                                    RkRgaGetRgaFormat(relSrcRect.format),0);
-		/* src1 */
-		if (src1)
-		    NormalRgaSetPatVirtualInfo(&rgaReg, src1Fd != -1 ? src1Fd : 0,
-		                               (unsigned long)src1Buf,
-		                               (unsigned long)src1Buf + src1VirW * src1VirH,
-		                               src1VirW, src1VirH, &clip,
-		                               RkRgaGetRgaFormat(relSrc1Rect.format),0);
+        /* src1 */
+        if (src1)
+            NormalRgaSetPatVirtualInfo(&rgaReg, src1Fd != -1 ? src1Fd : 0,
+                                       (unsigned long)src1Buf,
+                                       (unsigned long)src1Buf + src1VirW * src1VirH,
+                                       src1VirW, src1VirH, &clip,
+                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
         /*dst*/
         NormalRgaSetDstVirtualInfo(&rgaReg, dstFd != -1 ? dstFd : 0,
                                    (unsigned long)dstBuf,
@@ -1209,13 +1213,13 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
                                    (unsigned int)srcBuf + srcVirW * srcVirH,
                                    srcVirW, srcVirH,
                                    RkRgaGetRgaFormat(relSrcRect.format),0);
-		/* src1 */
-		if (src1)
-			NormalRgaSetPatVirtualInfo(&rgaReg, src1Fd != -1 ? src1Fd : 0,
-	                                   (unsigned int)src1Buf,
-	                                   (unsigned int)src1Buf + src1VirW * src1VirH,
-	                                   src1VirW, src1VirH, &clip,
-	                                   RkRgaGetRgaFormat(relSrc1Rect.format),0);
+        /* src1 */
+        if (src1)
+            NormalRgaSetPatVirtualInfo(&rgaReg, src1Fd != -1 ? src1Fd : 0,
+                                       (unsigned int)src1Buf,
+                                       (unsigned int)src1Buf + src1VirW * src1VirH,
+                                       src1VirW, src1VirH, &clip,
+                                       RkRgaGetRgaFormat(relSrc1Rect.format),0);
         /*dst*/
         NormalRgaSetDstVirtualInfo(&rgaReg, dstFd != -1 ? dstFd : 0,
                                    (unsigned int)dstBuf,
@@ -1230,45 +1234,49 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
     NormalRgaSetSrcActiveInfo(&rgaReg, srcActW, srcActH, srcXPos, srcYPos);
     NormalRgaSetDstActiveInfo(&rgaReg, dstActW, dstActH, dstXPos, dstYPos);
     if (src1)
-		NormalRgaSetPatActiveInfo(&rgaReg, src1ActW, src1ActH, src1XPos, src1YPos);
+        NormalRgaSetPatActiveInfo(&rgaReg, src1ActW, src1ActH, src1XPos, src1YPos);
 
-	if (src1) {
-		/* special config for yuv + rgb => rgb */
-		/* src0 y2r, src1 bupass, dst bupass */
-		if (NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
-			NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrc1Rect.format)) &&
-			NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relDstRect.format)))
-			yuvToRgbMode |= 0x1 << 0;
+    if (dst->color_space_mode & full_csc_mask) {
+        NormalRgaFullColorSpaceConvert(&rgaReg, dst->color_space_mode);
+    } else {
+        if (src1) {
+            /* special config for yuv + rgb => rgb */
+            /* src0 y2r, src1 bupass, dst bupass */
+            if (NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
+                NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrc1Rect.format)) &&
+                NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relDstRect.format)))
+                yuvToRgbMode |= 0x1 << 0;
 
-		/* special config for yuv + rgba => yuv on src1 */
-		/* src0 y2r, src1 bupass, dst y2r */
-		if (NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
-			NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrc1Rect.format)) &&
-			NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relDstRect.format))) {
-				yuvToRgbMode |= 0x1 << 0;		//src0
-				yuvToRgbMode |= 0x2 << 2;		//dst
-			}
+            /* special config for yuv + rgba => yuv on src1 */
+            /* src0 y2r, src1 bupass, dst y2r */
+            if (NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
+                NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrc1Rect.format)) &&
+                NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relDstRect.format))) {
+                yuvToRgbMode |= 0x1 << 0;        //src0
+                yuvToRgbMode |= 0x2 << 2;        //dst
+            }
 
-		/* special config for rgb + rgb => yuv on dst */
-		/* src0 bupass, src1 bupass, dst y2r */
-		if (NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
-			NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrc1Rect.format)) &&
-			NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relDstRect.format)))
-			yuvToRgbMode |= 0x2 << 2;
-	} else {
-		/* special config for yuv to rgb */
-	    if (NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
-	        NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relDstRect.format)))
-	        yuvToRgbMode |= 0x1 << 0;
+            /* special config for rgb + rgb => yuv on dst */
+            /* src0 bupass, src1 bupass, dst y2r */
+            if (NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
+                NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrc1Rect.format)) &&
+                NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relDstRect.format)))
+                yuvToRgbMode |= 0x2 << 2;
+        } else {
+            /* special config for yuv to rgb */
+            if (NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
+                NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relDstRect.format)))
+                yuvToRgbMode |= 0x1 << 0;
 
-	    /* special config for rgb to yuv */
-	    if (NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
-	        NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relDstRect.format)))
-	        yuvToRgbMode |= 0x2 << 2;
+            /* special config for rgb to yuv */
+            if (NormalRgaIsRgbFormat(RkRgaGetRgaFormat(relSrcRect.format)) &&
+                NormalRgaIsYuvFormat(RkRgaGetRgaFormat(relDstRect.format)))
+                yuvToRgbMode |= 0x2 << 2;
+        }
+
+        if(dst->color_space_mode > 0)
+            yuvToRgbMode = dst->color_space_mode;
     }
-
-    if(dst->color_space_mode > 0)
-        yuvToRgbMode = dst->color_space_mode;
 
     /* mode
      * scaleMode:set different algorithm to scale.
@@ -1282,29 +1290,29 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
 
     NormalRgaNNQuantizeMode(&rgaReg, dst);
 
-	NormalRgaDitherMode(&rgaReg, dst, relDstRect.format);
+    NormalRgaDitherMode(&rgaReg, dst, relDstRect.format);
 
     if (srcMmuFlag || dstMmuFlag) {
         NormalRgaMmuInfo(&rgaReg, 1, 0, 0, 0, 0, 2);
         NormalRgaMmuFlag(&rgaReg, srcMmuFlag, dstMmuFlag);
     }
-	if (src1) {
-		if (src1MmuFlag) {
-			rgaReg.mmu_info.mmu_flag |= (0x1 << 11);
-			rgaReg.mmu_info.mmu_flag |= (0x1 << 9);
-		}
-		/*enable src0 + src1 => dst*/
-		rgaReg.bsfilter_flag = 1;
-	}
+    if (src1) {
+        if (src1MmuFlag) {
+            rgaReg.mmu_info.mmu_flag |= (0x1 << 11);
+            rgaReg.mmu_info.mmu_flag |= (0x1 << 9);
+        }
+        /*enable src0 + src1 => dst*/
+        rgaReg.bsfilter_flag = 1;
+    }
 
-	/* ROP */
-	/* This special Interface can do some basic logical operations */
-	if(src->rop_code > 0)
-	{
-		rgaReg.rop_code = src->rop_code;
-		rgaReg.alpha_rop_flag = 0x3;
-		rgaReg.alpha_rop_mode = 0x1;
-	}
+    /* ROP */
+    /* This special Interface can do some basic logical operations */
+    if(src->rop_code > 0)
+    {
+        rgaReg.rop_code = src->rop_code;
+        rgaReg.alpha_rop_flag = 0x3;
+        rgaReg.alpha_rop_mode = 0x1;
+    }
 
     /*color key*/
     /* if need this funtion, maybe should patch the rga driver. */
@@ -1340,8 +1348,8 @@ int RgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {
 #endif
 #endif
 #endif
-    if(dst->sync_mode == RGA_BLIT_ASYNC) {
-        sync_mode = dst->sync_mode;
+    if(src->sync_mode == RGA_BLIT_ASYNC || dst->sync_mode == RGA_BLIT_ASYNC) {
+        sync_mode = RGA_BLIT_ASYNC;
     }
     /* using sync to pass config to rga driver. */
     if(ioctl(ctx->rgaFd, sync_mode, &rgaReg)) {

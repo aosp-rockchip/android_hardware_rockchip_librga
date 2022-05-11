@@ -48,11 +48,7 @@
 #include <utils/Mutex.h>
 #include <utils/Singleton.h>
 #include <ui/PixelFormat.h>
-#include <ui/Rect.h>
-#include <ui/Region.h>
-#include <ui/DisplayInfo.h>
 #include <ui/GraphicBufferMapper.h>
-#include <gui/ISurfaceComposer.h>
 #endif
 
 #include "RockchipRga.h"
@@ -82,11 +78,11 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
         mLogAlways(0),
         mContext(NULL) {
         RkRgaInit();
-        ALOGE("Rga built version:%s %s", RGA_LIB_VERSION, RGA_BUILT_VERSION);
+        ALOGE("%s", RGA_API_FULL_VERSION);
     }
 
     RockchipRga::~RockchipRga() {
-        RgaDeInit(mContext);
+        RgaDeInit(&mContext);
     }
 
     int RockchipRga::RkRgaInit() {
@@ -106,13 +102,13 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
 
     void RockchipRga::RkRgaDeInit() {
         if (mSupportRga)
-            RgaDeInit(mContext);
+            RgaDeInit(&mContext);
 
         mSupportRga = false;
     }
 
     void RockchipRga::RkRgaGetContext(void **ctx) {
-        memcpy(ctx, &mContext, sizeof(ctx));
+        *ctx = mContext;
     }
 
 #ifdef LINUX
@@ -126,7 +122,7 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
         arg.bpp = bpp;
         arg.width = width;
         arg.height = height;
-		arg.flags = flags;
+        arg.flags = flags;
 
         ret = drmIoctl(drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &arg);
         if (ret) {
@@ -166,7 +162,7 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
 #endif
     }
 
-	int RockchipRga::RkRgaGetAllocBufferExt(bo_t *bo_info, int width, int height, int bpp, int flags) {
+    int RockchipRga::RkRgaGetAllocBufferExt(bo_t *bo_info, int width, int height, int bpp, int flags) {
         static const char* card = "/dev/dri/card0";
         int ret;
         int drm_fd;
@@ -190,13 +186,13 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
         return 0;
     }
 
-	int RockchipRga::RkRgaGetAllocBuffer(bo_t *bo_info, int width, int height, int bpp) {
-		return RkRgaGetAllocBufferExt(bo_info, width, height, bpp, 0);
-	}
+    int RockchipRga::RkRgaGetAllocBuffer(bo_t *bo_info, int width, int height, int bpp) {
+        return RkRgaGetAllocBufferExt(bo_info, width, height, bpp, 0);
+    }
 
-	int RockchipRga::RkRgaGetAllocBufferCache(bo_t *bo_info, int width, int height, int bpp) {
-		return RkRgaGetAllocBufferExt(bo_info, width, height, bpp, ROCKCHIP_BO_CACHABLE);
-	}
+    int RockchipRga::RkRgaGetAllocBufferCache(bo_t *bo_info, int width, int height, int bpp) {
+        return RkRgaGetAllocBufferExt(bo_info, width, height, bpp, ROCKCHIP_BO_CACHABLE);
+    }
 
     int RockchipRga::RkRgaGetMmap(bo_t *bo_info) {
 #if LIBDRM
@@ -238,7 +234,7 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
     int RockchipRga::RkRgaGetBufferFd(bo_t *bo_info, int *fd) {
 #if LIBDRM
         int ret = 0;
-        ret = drmPrimeHandleToFD(bo_info->fd, bo_info->handle, 0, fd);
+        ret = drmPrimeHandleToFD(bo_info->fd, bo_info->handle, DRM_CLOEXEC | DRM_RDWR, fd);
         return ret;
 #else
         return -1;
@@ -253,11 +249,11 @@ RGA_SINGLETON_STATIC_INSTANCE(RockchipRga)
         return ret;
     }
 
-	int RockchipRga::RkRgaGetHandleMapCpuAddress(buffer_handle_t handle, void **buf) {
-		int ret = 0;
-		ret = RkRgaGetHandleMapAddress(handle, buf);
-		return ret;
-	}
+    int RockchipRga::RkRgaGetHandleMapCpuAddress(buffer_handle_t handle, void **buf) {
+        int ret = 0;
+        ret = RkRgaGetHandleMapAddress(handle, buf);
+        return ret;
+    }
 #endif
 
     int RockchipRga::RkRgaBlit(rga_info *src, rga_info *dst, rga_info *src1) {

@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2016 Rockchip Electronics Co., Ltd.
  * Authors:
- *	Zhiqin Wei <wzq@rock-chips.com>
+ *    Zhiqin Wei <wzq@rock-chips.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ extern "C"
 {
 #endif
 
-
+#include <stdint.h>
 
 #define RGA_BLIT_SYNC   0x5017
 #define RGA_BLIT_ASYNC  0x5018
@@ -32,6 +32,12 @@ extern "C"
 #define RGA_GET_RESULT  0x501a
 #define RGA_GET_VERSION 0x501b
 
+#define RGA2_BLIT_SYNC   0x6017
+#define RGA2_BLIT_ASYNC  0x6018
+#define RGA2_FLUSH       0x6019
+#define RGA2_GET_RESULT  0x601a
+#define RGA2_GET_VERSION 0x601b
+#define RGA2_GET_VERSION 0x601b
 
 #define RGA_REG_CTRL_LEN    0x8    /* 8  */
 #define RGA_REG_CMD_LEN     0x1c   /* 28 */
@@ -74,8 +80,19 @@ enum {
     yuv2rgb_mode0            = 0x0,     /* BT.601 MPEG */
     yuv2rgb_mode1            = 0x1,     /* BT.601 JPEG */
     yuv2rgb_mode2            = 0x2,     /* BT.709      */
-};
 
+    rgb2yuv_601_full                = 0x1 << 8,
+    rgb2yuv_709_full                = 0x2 << 8,
+    yuv2yuv_601_limit_2_709_limit   = 0x3 << 8,
+    yuv2yuv_601_limit_2_709_full    = 0x4 << 8,
+    yuv2yuv_709_limit_2_601_limit   = 0x5 << 8,
+    yuv2yuv_709_limit_2_601_full    = 0x6 << 8,     //not support
+    yuv2yuv_601_full_2_709_limit    = 0x7 << 8,
+    yuv2yuv_601_full_2_709_full     = 0x8 << 8,     //not support
+    yuv2yuv_709_full_2_601_limit    = 0x9 << 8,     //not support
+    yuv2yuv_709_full_2_601_full     = 0xa << 8,     //not support
+    full_csc_mask = 0xf00,
+};
 
 /* RGA rotate mode */
 enum {
@@ -148,25 +165,39 @@ typedef enum _Rga_SURF_FORMAT {
     RK_FORMAT_BPP4         = 0x12 << 8,
     RK_FORMAT_BPP8         = 0x13 << 8,
 
-	RK_FORMAT_Y4           = 0x14 << 8,
-	RK_FORMAT_YCbCr_400    = 0x15 << 8,
+    RK_FORMAT_Y4           = 0x14 << 8,
+    RK_FORMAT_YCbCr_400    = 0x15 << 8,
 
-	RK_FORMAT_BGRX_8888    = 0x16 << 8,
+    RK_FORMAT_BGRX_8888    = 0x16 << 8,
 
-	RK_FORMAT_YVYU_422     = 0x18 << 8,
-	RK_FORMAT_YVYU_420     = 0x19 << 8,
-	RK_FORMAT_VYUY_422     = 0x1a << 8,
-	RK_FORMAT_VYUY_420     = 0x1b << 8,
-	RK_FORMAT_YUYV_422     = 0x1c << 8,
-	RK_FORMAT_YUYV_420     = 0x1d << 8,
-	RK_FORMAT_UYVY_422     = 0x1e << 8,
-	RK_FORMAT_UYVY_420     = 0x1f << 8,
+    RK_FORMAT_YVYU_422     = 0x18 << 8,
+    RK_FORMAT_YVYU_420     = 0x19 << 8,
+    RK_FORMAT_VYUY_422     = 0x1a << 8,
+    RK_FORMAT_VYUY_420     = 0x1b << 8,
+    RK_FORMAT_YUYV_422     = 0x1c << 8,
+    RK_FORMAT_YUYV_420     = 0x1d << 8,
+    RK_FORMAT_UYVY_422     = 0x1e << 8,
+    RK_FORMAT_UYVY_420     = 0x1f << 8,
 
     RK_FORMAT_YCbCr_420_SP_10B = 0x20 << 8,
-	RK_FORMAT_YCrCb_420_SP_10B = 0x21 << 8,
-	RK_FORMAT_YCbCr_422_10b_SP = 0x22 << 8,
-	RK_FORMAT_YCrCb_422_10b_SP = 0x23 << 8,
-    RK_FORMAT_UNKNOWN       = 0x100 << 8,
+    RK_FORMAT_YCrCb_420_SP_10B = 0x21 << 8,
+    RK_FORMAT_YCbCr_422_10b_SP = 0x22 << 8,
+    RK_FORMAT_YCrCb_422_10b_SP = 0x23 << 8,
+
+    RK_FORMAT_BGR_565      = 0x24 << 8,
+    RK_FORMAT_BGRA_5551    = 0x25 << 8,
+    RK_FORMAT_BGRA_4444    = 0x26 << 8,
+
+    RK_FORMAT_ARGB_8888    = 0x28 << 8,
+    RK_FORMAT_XRGB_8888    = 0x29 << 8,
+    RK_FORMAT_ARGB_5551    = 0x2a << 8,
+    RK_FORMAT_ARGB_4444    = 0x2b << 8,
+    RK_FORMAT_ABGR_8888    = 0x2c << 8,
+    RK_FORMAT_XBGR_8888    = 0x2d << 8,
+    RK_FORMAT_ABGR_5551    = 0x2e << 8,
+    RK_FORMAT_ABGR_4444    = 0x2f << 8,
+
+    RK_FORMAT_UNKNOWN      = 0x100 << 8,
 } RgaSURF_FORMAT;
 
 
@@ -277,7 +308,20 @@ typedef struct line_draw_t {
 }
 line_draw_t;
 
+/* color space convert coefficient. */
+typedef struct csc_coe_t {
+    int16_t r_v;
+    int16_t g_y;
+    int16_t b_u;
+    int32_t off;
+} csc_coe_t;
 
+typedef struct full_csc_t {
+    unsigned char flag;
+    csc_coe_t coe_y;
+    csc_coe_t coe_u;
+    csc_coe_t coe_v;
+} full_csc_t;
 
 struct rga_req {
     unsigned char render_mode;            /* (enum) process mode sel */
@@ -353,11 +397,13 @@ struct rga_req {
     unsigned char  alpha_rop_mode;        /* ([0~1] alpha mode)       */
                                           /* ([2~3] rop   mode)       */
                                           /* ([4]   zero  mode en)    */
-                                          /* ([5]   dst   alpha mode) */
+                                          /* ([5]   dst   alpha mode) (RGA1) */
 
     unsigned char  src_trans_mode;
 
-	unsigned char  dither_mode;
+    unsigned char  dither_mode;
+
+    full_csc_t full_csc;            /* full color space convert */
 
     unsigned char CMD_fin_int_enable;
 
@@ -523,29 +569,29 @@ RGA_set_dst_act_info(
 #if defined(__arm64__) || defined(__aarch64__)
 int
 RGA_set_dst_vir_info(
-		struct rga_req *msg,
-		unsigned long   yrgb_addr,  /* yrgb_addr   */
-		unsigned long   uv_addr,    /* uv_addr     */
-		unsigned long   v_addr,     /* v_addr      */
-		unsigned int   vir_w,       /* vir width   */
-		unsigned int   vir_h,       /* vir height  */
-		RECT           *clip,       /* clip window */
-		unsigned char  format,      /* format      */
-		unsigned char  a_swap_en
-		);
+    struct rga_req *msg,
+    unsigned long   yrgb_addr,  /* yrgb_addr   */
+    unsigned long   uv_addr,    /* uv_addr     */
+    unsigned long   v_addr,     /* v_addr      */
+    unsigned int   vir_w,       /* vir width   */
+    unsigned int   vir_h,       /* vir height  */
+    RECT           *clip,       /* clip window */
+    unsigned char  format,      /* format      */
+    unsigned char  a_swap_en
+);
 #else
 int
 RGA_set_dst_vir_info(
-		struct rga_req *msg,
-		unsigned int   yrgb_addr,   /* yrgb_addr   */
-		unsigned int   uv_addr,     /* uv_addr     */
-		unsigned int   v_addr,      /* v_addr      */
-		unsigned int   vir_w,       /* vir width   */
-		unsigned int   vir_h,       /* vir height  */
-		RECT           *clip,       /* clip window */
-		unsigned char  format,      /* format      */
-		unsigned char  a_swap_en
-		);
+    struct rga_req *msg,
+    unsigned int   yrgb_addr,   /* yrgb_addr   */
+    unsigned int   uv_addr,     /* uv_addr     */
+    unsigned int   v_addr,      /* v_addr      */
+    unsigned int   vir_w,       /* vir width   */
+    unsigned int   vir_h,       /* vir height  */
+    RECT           *clip,       /* clip window */
+    unsigned char  format,      /* format      */
+    unsigned char  a_swap_en
+);
 #endif
 
 int
@@ -654,14 +700,14 @@ RGA_set_color_fill_mode(
 
 int
 RGA_set_line_point_drawing_mode(
-		struct rga_req *msg,
-		POINT sp,                     /* start point              */
-		POINT ep,                     /* end   point              */
-		unsigned int color,           /* line point drawing color */
-		unsigned int line_width,      /* line width               */
-		unsigned char AA_en,          /* AA en                    */
-		unsigned char last_point_en   /* last point en            */
-		);
+    struct rga_req *msg,
+    POINT sp,                     /* start point              */
+    POINT ep,                     /* end   point              */
+    unsigned int color,           /* line point drawing color */
+    unsigned int line_width,      /* line width               */
+    unsigned char AA_en,          /* AA en                    */
+    unsigned char last_point_en   /* last point en            */
+);
 
 
 int

@@ -52,7 +52,7 @@
 #endif
 
 int         RgaInit(void **ctx);
-int         RgaDeInit(void *ctx);
+int         RgaDeInit(void **ctx);
 int         RgaBlit(rga_info_t *src, rga_info_t *dst, rga_info_t *src1);
 int         RgaFlush();
 int         RgaCollorFill(rga_info_t *dst);
@@ -206,6 +206,7 @@ bool        NormalRgaIsYuvFormat(int format);
 
 bool        NormalRgaIsRgbFormat(int format);
 
+bool        NormalRgaFormatHasAlpha(int format);
 
 // 0/near  1/bilnear  2/bicubic
 // 0/copy 1/rotate_scale 2/x_mirror 3/y_mirror
@@ -290,6 +291,8 @@ int         NormalRgaUpdatePattenBuffMode(struct rga_req *msg,
         unsigned int h,        unsigned int format);
 
 int NormalRgaNNQuantizeMode(struct rga_req *msg, rga_info *dst);
+
+int NormalRgaFullColorSpaceConvert(struct rga_req *msg, int color_space_mode);
 
 int NormalRgaDitherMode(struct rga_req *msg, rga_info *dst, int format);
 

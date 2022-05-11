@@ -27,12 +27,13 @@
 #
 
 LOCAL_PATH:= $(call my-dir)
+
+$(info $(shell $(LOCAL_PATH)/genversion.sh Android.mk))
+
 ifeq (1,$(strip $(shell expr $(PLATFORM_SDK_VERSION) \< 28)))
 
 ifneq ($(strip $(BOARD_USE_DRM)), true)
 include $(CLEAR_VARS)
-
-$(info $(shell $(LOCAL_PATH)/version.sh))
 
 LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
 
@@ -122,8 +123,6 @@ endif #end of BOARD_USE_DRM=false
 ifeq ($(strip $(BOARD_USE_DRM)), true)
 include $(CLEAR_VARS)
 
-$(info $(shell $(LOCAL_PATH)/version.sh))
-
 LOCAL_SRC_FILES += \
     core/RockchipRga.cpp \
     core/GrallocOps.cpp \
@@ -195,8 +194,6 @@ ifeq ($(strip $(BOARD_USE_DRM)), future)
 ifeq ($(strip $(BOARD_USE_DRM)), true)
 include $(CLEAR_VARS)
 
-$(info $(shell $(LOCAL_PATH)/version.sh))
-
 LOCAL_SRC_FILES += \
     core/RockchipRga.cpp \
     core/GrallocOps.cpp \
@@ -238,3 +235,4 @@ endif #end of BOARD_USE_DRM=true
 endif #end of BOARD_USE_DRM=future it will be used when upstrean in the future
 
 endif #end of PLATFORM_SDK_VERSION < 28
+include $(call first-makefiles-under,$(LOCAL_PATH))

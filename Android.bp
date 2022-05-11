@@ -16,14 +16,16 @@ bootstrap_go_package {
 }
 
 genrule {
-	name: "gen_rga_version",
+	name: "gen_rga_api_version",
 	srcs: [
 		"version.h.template",
 		".git/"
 	],
 	out: ["version.h"],
-	cmd: "rm -f $(location version.h) && " + "bash $(location version.sh) < $(in) > $(out)",
-	tool_files: ["version.sh"],
+
+	cmd: "rm -f $(location version.h) && " + "bash $(location genversion.sh) Android.bp < $(in) > $(out)",
+
+	tool_files: ["genversion.sh"],
 }
 
 cc_librga {
@@ -37,14 +39,15 @@ cc_library_shared {
     ],
 
     vendor_available: true,
-
-	generated_headers: [
-        "gen_rga_version",
+/*
+    generated_headers: [
+        "gen_rga_api_version",
     ],
-
+*/
     header_libs: [
         "gl_headers",
         "libgui_headers",
+        "libhardware_headers",
         "libbinder_headers",
         "liblog_headers",
     ],
@@ -64,10 +67,7 @@ cc_library_shared {
     include_dirs: [
         "external/libdrm",
         "external/libdrm/include/drm",
-        "hardware/libhardware/include/hardware",
-        "hardware/libhardware/modules/gralloc",
         "frameworks/native/libs/nativewindow/include",
-        "system/core/liblog/include",
         "system/core/libsync",
         "system/core/libsync/include",
     ],
